@@ -797,74 +797,70 @@ def main():
         # ---------- 1) 决策点：轮到我、枪还在桌上（还能用道具）----------
         if my_turn_ready(d):
             txt = board_text(d)
-            with open(NEED, 'w', encoding='utf-8') as f:
-                _lb = lessons_brief()
-                _rm = T['needHint']
-                if _lb:
-                    _hdr = '\n--- 你的教训（lessons.md）---\n' if LANGSET == 'zh' else '\n--- your lessons ---\n'
-                    f.write(txt + _hdr + _lb + '\n' + _rm)
+            _retry_note = ""
+            # 【2026-11-15 重构】把「写决策点 -> 等回答 -> 解析 -> 校验」包进 while True：
+            # 决策里写了手上没有的道具时，**在同一个循环里重写决策点并等它重写**，
+            # 而不是删文件 + continue（那样主循环不会重新判定，实测死锁 2 分钟）。
+            while True:
+                with open(NEED, "w", encoding="utf-8") as f:
+                    _lb = lessons_brief()
+                    _rm = T["needHint"]
+                    if _lb:
+                        _hdr = "\n--- 你的教训（lessons.md）---\n" if LANGSET == "zh" else "\n--- your lessons ---\n"
+                        f.write(txt + _retry_note + _hdr + _lb + "\n" + _rm)
+                    else:
+                        f.write(txt + _retry_note + "\n" + _rm)
+                if _retry_note:
+                    log("  [重问] 已把「道具不存在」写回决策点，等它重写")
                 else:
-                    f.write(txt + '\n' + _rm)
-            log(T['dpPoint'].format(txt=txt))
-            dec = None
-            t0 = time.time()
-            while time.time() - t0 < 600 and not os.path.exists(STOP):
-                if os.path.exists(DEC):
-                    dec = open(DEC, encoding='utf-8').read().strip().lower()
-                    try:
-                        os.remove(DEC)
-                    except Exception:
-                        pass
+                    log(T["dpPoint"].format(txt=txt))
+                dec = None
+                t0 = time.time()
+                while time.time() - t0 < 600 and not os.path.exists(STOP):
+                    if os.path.exists(DEC):
+                        dec = open(DEC, encoding="utf-8").read().strip().lower()
+                        try:
+                            os.remove(DEC)
+                        except Exception:
+                            pass
+                        break
+                    time.sleep(0.05)
+                try:
+                    os.remove(NEED)
+                except Exception:
+                    pass
+                if not dec:
+                    log("[决策] 没等到 decision.txt，跳过")
                     break
-                time.sleep(0.05)
-            try:
-                os.remove(NEED)
-            except Exception:
-                pass
-            if not dec:
-                log('[决策] 没等到 decision.txt，跳过')
-                continue
-
-            # 解析：use:x;use:y;shoot:dealer
-            uses = []
-            shot = None
-            steal_target = None
-            for part in dec.replace(',', ';').split(';'):
-                part = part.strip()
-                if part.startswith('use:'):
-                    uses.append(item_en(part[4:].strip()))
-                elif part.startswith('steal:'):
-                    steal_target = item_en(part[6:].strip())
-                elif part.startswith('shoot:'):
-                    shot = part[6:].strip()
-                elif part in ('dealer', 'self'):
-                    shot = part
-            log('[决策] 收到: uses=%s shot=%s' % (uses, shot))
-
-            # 校验：什么都没解析出来 = 非法决策。以前这里直接往下走，
-            # 因为 shot=None 什么都不做 -> 立刻重写同一个决策点 -> AI 写错一次就忙等死循环。
-            # 严格校验：决策里点名的道具必须在手上。
-            # AI 有时会"构造一个完美连招"但其中某件它根本没有（踩过 use:adrenaline），
-            # 光跳过那一件会让 shot=None 白送回合，所以整条决策退回重问。
-            _inv = [str(x) for x in (d.get("items_player") or [])]
-            _bad = [u for u in uses if u not in _inv]
-            _fail = globals().get("_strict_fail", 0)
-            if not _bad:
-                globals()["_strict_fail"] = 0
-            if _bad:
-                # 【2026-11-15 修】原来这里是 os.remove(NEED) + continue，
-                # 实测会死锁：主循环下一轮没重新判定到「该决策」，文件被删了却不再重写，
-                # 游戏明明还能开枪（socket=home, can_shoot=True）却卡住不动 2 分钟。
-                # 现在改成：丢掉不存在的道具，其余部分照常执行 —— 不删文件、不 continue。
-                log("  !! 决策里点名的 %s 不在手上（实际有 %s）-> 只丢掉这几件，继续执行"
-                    % (", ".join(_bad), "、".join(_inv) or "无"))
-                globals()["_strict_fail"] = globals().get("_strict_fail", 0) + 1
-                uses = [u for u in uses if u in _inv]
-            if not uses and shot is None and steal_target is None:
-                log('[决策] !! 无法解析 %r —— 应该写 self / dealer / use:X;shoot:Y' % dec)
-                log('[决策]    3 秒后重问，先别慌')
-                time.sleep(3.0)
-                continue
+                uses = []
+                shot = None
+                steal_target = None
+                for part in dec.replace(",", ";").split(";"):
+                    part = part.strip()
+                    if part.startswith("use:"):
+                        uses.append(item_en(part[4:].strip()))
+                    elif part.startswith("steal:"):
+                        steal_target = item_en(part[6:].strip())
+                    elif part.startswith("shoot:"):
+                        shot = part[6:].strip()
+                    elif part in ("dealer", "self"):
+                        shot = part
+                log("[决策] 收到: uses=%s shot=%s" % (uses, shot))
+                _inv = [str(x) for x in (d.get("items_player") or [])]
+                _bad = [u for u in uses if u not in _inv]
+                if _bad:
+                    log("  !! 你写了 %s，但手上只有 %s -> 退回让它重写"
+                        % (", ".join(_bad), "、".join(_inv) or "无"))
+                    _retry_note = ("\n!! 你刚才写了 use:%s，但你手上没有\n"
+                                   "!! 你现在实际只有：%s\n"
+                                   "!! 别写手上没有的道具，重新写一遍 decision.txt\n"
+                                   % (", use:".join(_bad), "、".join(_inv) or "无"))
+                    continue
+                if not uses and shot is None and steal_target is None:
+                    log("[决策] !! 无法解析 %r —— 应该写 self / dealer / use:X;shoot:Y" % dec)
+                    _retry_note = "\n!! 你刚才写的内容看不懂：%s\n!! 请写 self / dealer / use:X;shoot:Y\n" % dec
+                    continue
+                break
 
             # ① 先用道具（必须在拿枪之前）
             for it in uses:
