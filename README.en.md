@@ -5,7 +5,7 @@
 
 **中文**: [README.md](README.md)
 
-![The status HUD](docs/screenshots/hud-en.png)
+![Demo](docs/screenshots/demo.gif)
 
 ---
 
