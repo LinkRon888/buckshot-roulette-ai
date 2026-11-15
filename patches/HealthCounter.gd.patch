@@ -1,0 +1,1240 @@
+--- scripts/HealthCounter.gd
++++ scripts/HealthCounter.gd
+@@ -210,3 +210,1237 @@
+ 	for i in range(uiArray.size()):
+ 		uiArray[i].visible = false
+ 	#uiparent.visible = false
++
++
++# ===================== DSH 状态导出（整份重写版）=====================
++var _dsh_acc := 0.0
++var _dsh_clicks := 0
++var _dsh_last_click := []
++var _dsh_last_left := -1
++var _dsh_shots := 0
++var _dsh_wins := 0
++var _dsh_losses := 0
++var _dsh_last_hp_p := -1
++var _dsh_last_hp_d := -1
++var _dsh_pm = null
++var _dsh_intro = null
++var _dsh_bcm = null
++var _dsh_sss = null
++
++# 缓存与节流
++var _dsh_mgr_cache := {}
++var _dsh_scan_cd := 0.0
++var _dsh_desc_nodes := []
++var _dsh_probe := []
++var _dsh_branches := []
++var _dsh_sign_buttons := []
++var _dsh_branch_nodes = []
++var _dsh_sign_info = []
++var _dsh_focusables := []
++
++const _DSH_WANTED := [
++	["round manager", "RoundManager"],
++	["item manager", "ItemManager"],
++	["shell spawner", "ShellSpawner"],
++	["permission manager", "PermissionManager"],
++	["shotgun shooting", "ShotgunShooting"],
++	["dealer intelligence", "DealerIntelligence"],
++	["briefcase machine", "BriefcaseMachine"],
++	["interaction manager", "InteractionManager"],
++	["intro manager", "IntroManager"],
++	["death manager", "DeathManager"],
++	["camera manager", "CameraManager"],
++	["item interaction", "ItemInteraction"],
++	["signature manager", "SignatureManager"],
++	["heaven manager", "HeavenManager"],
++	["cursor manager", "CursorManager"],
++	["controller manager", "ControllerManager"],
++	["ending manager", "EndingManager"],
++	["dialogue manager", "DialogueManager"],
++]
++
++
++# ---------- 1 秒一次的重扫描（只在这里遍历场景树）----------
++func _dsh_scan_all(delta):
++	_dsh_scan_cd -= delta
++	if _dsh_scan_cd > 0.0:
++		return
++	_dsh_scan_cd = 1.0
++	var probe := []
++	var found := {}
++	var descs := []
++	var stack = [get_tree().root]
++	var guard := 0
++	while stack.size() > 0 and guard < 30000:
++		guard += 1
++		var n = stack.pop_back()
++		if n == null:
++			continue
++		var sc = n.get_script()
++		if sc != null:
++			var base = str(sc.resource_path).get_file()
++			if probe.size() < 40:
++				probe.append([str(n.name), base])
++			for w in _DSH_WANTED:
++				if not found.has(str(w[1])) and base == str(w[1]) + ".gd":
++					found[str(w[1])] = n
++			if base == "PickupIndicator.gd":
++				descs.append(n)
++		for c in n.get_children():
++			stack.push_back(c)
++	_dsh_probe = probe
++	_dsh_desc_nodes = descs
++	# 收集所有交互对象（含门、签名键等不在 PermissionManager 里的）
++	var brs2 := []
++	_dsh_branch_nodes = []
++	var stack3 = [get_tree().root]
++	var g3 := 0
++	while stack3.size() > 0 and g3 < 30000:
++		g3 += 1
++		var n3 = stack3.pop_back()
++		if n3 == null:
++			continue
++		var sc3 = n3.get_script()
++		if sc3 != null:
++			var base3 = str(sc3.resource_path).get_file()
++			if base3.find("InteractionBranch") >= 0 or base3.find("SignatureButtonBranch") >= 0:
++				var al3 := ""
++				if "interactionAlias" in n3:
++					al3 = str(n3.interactionAlias)
++				var ok3 := false
++				if "interactionAllowed" in n3:
++					ok3 = bool(n3.interactionAllowed)
++				var pos3 = [-1, -1]
++				var c3 = get_viewport().get_camera_3d()
++				if c3 != null and n3 is Node3D:
++					var pv3 = c3.unproject_position(n3.global_position)
++					pos3 = [int(pv3.x), int(pv3.y)]
++				brs2.append([al3, ok3, pos3[0], pos3[1], str(n3.name)])
++				_dsh_branch_nodes.append(n3)
++		for c4 in n3.get_children():
++			stack3.push_back(c4)
++	_dsh_branches = brs2
++	var sbs := []
++	var stack4 = [get_tree().root]
++	var g4 := 0
++	while stack4.size() > 0 and g4 < 300000:
++		g4 += 1
++		var n4 = stack4.pop_back()
++		if n4 == null:
++			continue
++		var sc4 = n4.get_script()
++		# 宽松判定：脚本路径可能拿不到 get_file()，退回按路径子串 / 有 Press 方法 + intbranch 子节点
++		var is_sign_btn = false
++		if sc4 != null:
++			var rp4 = str(sc4.resource_path)
++			if rp4.find("SignatureButton") >= 0:
++				is_sign_btn = true
++		if not is_sign_btn and n4.has_method("Press"):
++			is_sign_btn = true
++		if is_sign_btn:
++			sbs.append(n4)
++		for c5 in n4.get_children():
++			stack4.push_back(c5)
++	_dsh_sign_buttons = sbs
++	var fcs := []
++	var stack5 = [get_tree().root]
++	var g5 := 0
++	while stack5.size() > 0 and g5 < 30000:
++		g5 += 1
++		var n5 = stack5.pop_back()
++		if n5 == null:
++			continue
++		if n5 is Control and n5.focus_mode != Control.FOCUS_NONE and n5.visible:
++			fcs.append([str(n5.name), str(n5.get_path()), str(n5.get_class()), int(n5.focus_mode)])
++		for c6 in n5.get_children():
++			stack5.push_back(c6)
++	_dsh_focusables = fcs
++	for w2 in _DSH_WANTED:
++		var k = str(w2[1])
++		if found.has(k):
++			_dsh_mgr_cache[k] = found[k]
++		else:
++			var old = _dsh_mgr_cache.get(k, null)
++			if old != null and not is_instance_valid(old):
++				_dsh_mgr_cache.erase(k)
++	# 顺手刷新几个固定节点
++	_dsh_intro = found.get("IntroManager", _dsh_intro)
++	_dsh_bcm = found.get("BriefcaseMachine", _dsh_bcm)
++	_dsh_sss = found.get("ShotgunShooting", _dsh_sss)
++
++
++# ---------- 工具 ----------
++func _dsh_simple_value(n, nm):
++	var v = n.get(nm)
++	var t = typeof(v)
++	if t == TYPE_INT or t == TYPE_FLOAT or t == TYPE_BOOL or t == TYPE_STRING:
++		return v
++	if t == TYPE_ARRAY:
++		var arr := []
++		for x in v:
++			var tx = typeof(x)
++			if tx == TYPE_INT or tx == TYPE_FLOAT or tx == TYPE_BOOL or tx == TYPE_STRING:
++				arr.append(x)
++			else:
++				return null
++		return arr
++	return null
++
++
++func _dsh_dump_node(n):
++	var out := {}
++	if n == null:
++		return out
++	for p in n.get_property_list():
++		var nm = str(p.name)
++		if nm.begins_with("_") or nm == "script" or nm == "resource_local_to_scene":
++			continue
++		var sv = _dsh_simple_value(n, nm)
++		if sv != null:
++			out[nm] = sv
++	return out
++
++
++func _dsh_hit_point(cam, branch, mesh):
++	var vp = get_viewport()
++	if vp == null or vp.world_3d == null:
++		return null
++	var space = vp.world_3d.direct_space_state
++	var centre = mesh.global_transform * mesh.get_aabb().get_center()
++	var base = cam.unproject_position(centre)
++	var offs = [
++		Vector2(0, 0), Vector2(0, 40), Vector2(40, 0), Vector2(0, -40), Vector2(-40, 0),
++		Vector2(40, 40), Vector2(-40, 40), Vector2(40, -40), Vector2(-40, -40),
++		Vector2(0, 80), Vector2(80, 0), Vector2(0, -80), Vector2(-80, 0),
++	]
++	for off in offs:
++		var sp = base + off
++		var frm = cam.project_ray_origin(sp)
++		var nrm = cam.project_ray_normal(sp)
++		var q = PhysicsRayQueryParameters3D.create(frm, frm + nrm * 400.0)
++		var hit = space.intersect_ray(q)
++		if hit.is_empty():
++			continue
++		var col = hit.get("collider")
++		if col == null:
++			continue
++		var okp = false
++		if col == mesh:
++			okp = true
++		elif col is Node and mesh.is_ancestor_of(col):
++			okp = true
++		elif col is Node and branch.is_ancestor_of(col):
++			okp = true
++		if okp:
++			return sp
++	return null
++
++
++# ---------- _input 点击遥测 ----------
++func _input(event):
++	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
++		_dsh_clicks += 1
++		var c3 = get_viewport().get_camera_3d()
++		var hn := ""
++		if c3 != null:
++			var frm2 = c3.project_ray_origin(event.position)
++			var to2 = frm2 + c3.project_ray_normal(event.position) * 300.0
++			var sp3 = get_viewport().world_3d.direct_space_state
++			var hit3 = sp3.intersect_ray(PhysicsRayQueryParameters3D.create(frm2, to2))
++			if not hit3.is_empty():
++				hn = str(hit3.collider.name)
++		_dsh_last_click = [int(event.position.x), int(event.position.y), hn]
++
++
++# ---------- 主循环 ----------
++func _process(delta):
++	_dsh_acc += delta
++	if _dsh_acc < 0.12:
++		return
++	_dsh_acc = 0.0
++	_dsh_scan_all(0.12)
++	_dsh_cmd()
++	_dsh_dump()
++
++
++func _dsh_dump():
++	if roundManager == null:
++		# 不在对局里也要写一次"不在对局"标记，否则旧数据会被当成当前局面
++		var d0 := {}
++		d0["in_match"] = false
++		d0["ms"] = int(Time.get_ticks_msec())
++		var f0 := FileAccess.open("C:/Users/<YOUR_USER>/Documents/deepseek-harness/default-workspace/out/br/state.json", FileAccess.WRITE)
++		if f0 != null:
++			f0.store_string(JSON.stringify(d0))
++			f0.close()
++		return
++	var d := {}
++	var im = roundManager.itemManager
++	var pm = _dsh_pm
++	if pm == null or not is_instance_valid(pm):
++		var stack2 = [get_tree().root]
++		var g2 := 0
++		while stack2.size() > 0 and g2 < 30000:
++			g2 += 1
++			var n2 = stack2.pop_back()
++			if n2 is PermissionManager:
++				pm = n2
++				_dsh_pm = n2
++				break
++			for c2 in n2.get_children():
++				stack2.push_back(c2)
++	var cam = get_viewport().get_camera_3d()
++
++	# ---- 血量 / 关卡 ----
++	d["hp_player"] = int(roundManager.health_player)
++	d["hp_dealer"] = int(roundManager.health_opponent)
++	d["round"] = int(roundManager.currentRound)
++	d["player_cuffed"] = bool(roundManager.playerCuffed)
++	d["dealer_cuffed"] = bool(roundManager.dealerCuffed)
++	d["sawed"] = bool(roundManager.barrelSawedOff)
++	d["batch"] = int(roundManager.playerData.currentBatchIndex) if roundManager.playerData != null else 0
++	if roundManager.roundArray != null and roundManager.roundArray.size() > 0:
++		# 满血上限取本关第 1 回合的 startingHealth —— 用 currentRound 会取到 0（后续回合的 startingHealth 是 0）
++		var ra = roundManager.roundArray[0]
++		d["start_hp"] = int(ra.startingHealth)
++		d["using_items"] = bool(ra.usingItems)
++		d["quota"] = int(ra.numberOfItemsToGrab)
++	else:
++		d["start_hp"] = 0
++		d["using_items"] = false
++		d["quota"] = 0
++
++	# ---- 弹药 ----
++	var live := 0
++	var blank := 0
++	var total := 0
++	if roundManager.shellSpawner != null:
++		for s in roundManager.shellSpawner.sequenceArray:
++			total += 1
++			if str(s) == "live":
++				live += 1
++			else:
++				blank += 1
++	d["live"] = live
++	d["blank"] = blank
++	d["left"] = total
++	# next_shell 只在「刚用过放大镜」的 15 秒内给（模拟画面上看到的结果），
++	# 平时一律 unknown —— 否则等于作弊码。
++	var nxt := "unknown"
++	if Time.get_ticks_msec() < _dsh_mag_until:
++		if roundManager.shellSpawner != null and roundManager.shellSpawner.sequenceArray.size() > 0:
++			nxt = str(roundManager.shellSpawner.sequenceArray[0])
++	d["next_shell"] = nxt
++	if total < _dsh_last_left:
++		_dsh_shots += 1
++	_dsh_last_left = total
++	d["shots"] = _dsh_shots
++	if _dsh_last_hp_d > 0 and int(roundManager.health_opponent) <= 0:
++		_dsh_wins += 1
++	if _dsh_last_hp_p > 0 and int(roundManager.health_player) <= 0:
++		_dsh_losses += 1
++	_dsh_last_hp_p = int(roundManager.health_player)
++	_dsh_last_hp_d = int(roundManager.health_opponent)
++	d["wins"] = _dsh_wins
++	d["losses"] = _dsh_losses
++
++	# ---- 道具 ----
++	var ip := []
++	var idl := []
++	if im != null:
++		for it in im.itemArray_player:
++			ip.append(str(it))
++		for it in im.itemArray_dealer:
++			idl.append(str(it))
++		# 我的：itemArray_player 可能是空的，真实清单在动态数组里（item_slots 也是这么建的）
++		if im.items_dynamicInteractionArray != null:
++			for br in im.items_dynamicInteractionArray:
++				if br != null and bool(br.isPlayerSide):
++					ip.append(str(br.itemName).to_lower())
++		d["grids_occupied"] = int(im.numberOfOccupiedGrids)
++		d["grabbed"] = int(im.numberOfItemsGrabbed)
++		d["grabbed_enemy"] = int(im.numberOfItemsGrabbed_enemy)
++		d["cigs_player"] = int(im.numberOfCigs_player)
++		d["cigs_dealer"] = int(im.numberOfCigs_dealer)
++	else:
++		d["grids_occupied"] = 0
++		d["grabbed"] = 0
++		d["grabbed_enemy"] = 0
++		d["cigs_player"] = 0
++		d["cigs_dealer"] = 0
++	d["items_player"] = ip
++	d["items_dealer"] = idl
++	d["sign_buttons"] = _dsh_sign_info
++
++	# ---- 道具 -> 格子 / 点位 ----
++	var itemslots := []
++	var pts2 := []
++	if im != null and im.items_dynamicInteractionArray != null:
++		for bi in im.items_dynamicInteractionArray:
++			if bi == null:
++				continue
++			var inm2 := ""
++			if "itemName" in bi:
++				inm2 = str(bi.itemName).to_lower()
++			var gi3 := -1
++			if "itemGridIndex" in bi:
++				gi3 = int(bi.itemGridIndex)
++			var ps3 := false
++			if "isPlayerSide" in bi:
++				ps3 = bool(bi.isPlayerSide)
++			itemslots.append([inm2, gi3, ps3])
++			if ps3 and cam != null:
++				var hp2 = null
++				var par2 = bi.get_parent()
++				if par2 != null:
++					for ch2 in par2.get_children():
++						if ch2 is MeshInstance3D and ch2.visible:
++							hp2 = _dsh_hit_point(cam, bi, ch2)
++							break
++				if hp2 != null:
++					pts2.append([inm2, int(hp2.x), int(hp2.y), true])
++				else:
++					pts2.append([inm2, -1, -1, false])
++	d["item_slots"] = itemslots
++	d["item_pts2"] = pts2
++
++	var myslots := []
++	var enslots := []
++	if im != null and cam != null:
++		for i in range(im.gridParentArray.size()):
++			var gp = im.gridParentArray[i]
++			if gp != null and gp is Node3D:
++				var pp2 = cam.unproject_position(gp.global_position)
++				var oc2 := false
++				if i < im.gridOccupiedArray.size():
++					oc2 = bool(im.gridOccupiedArray[i])
++				myslots.append([i, oc2, int(pp2.x), int(pp2.y)])
++		for j in range(im.gridParentArray_enemy.size()):
++			var ge = im.gridParentArray_enemy[j]
++			if ge != null and ge is Node3D:
++				var pe = cam.unproject_position(ge.global_position)
++				enslots.append([j, int(pe.x), int(pe.y)])
++	if im != null:
++		var cnt_true := 0
++		for ocx in im.gridOccupiedArray:
++			if bool(ocx):
++				cnt_true += 1
++		d["num_occupied"] = int(im.numberOfOccupiedGrids)
++		d["occupied_true"] = cnt_true
++	if im != null and "lerpDuration" in im:
++		d["lerp_duration"] = float(im.lerpDuration)
++
++	if im != null:
++		var spn := 0
++		if im.itemSpawnParent != null:
++			for chx in im.itemSpawnParent.get_children():
++				if chx == null:
++					continue
++				if chx.get_child_count() > 0:
++					var c0 = chx.get_child(0)
++					if str(c0.get_class()) == "Node3D" and chx.get_child_count() > 1:
++						spn += 1
++		d["spawn_children"] = im.itemSpawnParent.get_child_count() if im.itemSpawnParent != null else -1
++		d["dyn_inter"] = im.items_dynamicInteractionArray.size()
++		d["dyn_ind"] = im.items_dynamicIndicatorArray.size()
++	d["my_slots"] = myslots
++	d["enemy_slots"] = enslots
++
++	# ---- 能不能点枪 ----
++	var can_shoot := false
++	if pm != null:
++		for b in pm.interactionBranchArray:
++			if b != null and str(b.interactionAlias) == "shotgun":
++				can_shoot = bool(b.interactionAllowed)
++				break
++	d["can_shoot"] = can_shoot
++
++	# ---- 全场景交互对象（含门/签名键）：这是判断"在哪一步"的权威依据 ----
++	d["all_branches"] = _dsh_branches
++	var alnow := []
++	for bb in _dsh_branches:
++		if bool(bb[1]) and str(bb[0]) != "":
++			var dup := false
++			for ex in alnow:
++				if ex == str(bb[0]):
++					dup = true
++					break
++			if not dup:
++				alnow.append(str(bb[0]))
++	d["can_do"] = alnow
++
++	# ---- fs_dec：这一枪会不会真的执行（false=会，true=被锁/空操作）----
++	d["fs_dec"] = false
++	var imx = _dsh_mgr_get("InteractionManager")
++	if imx != null:
++		var vfs = imx.get("fs_dec")
++		if vfs != null:
++			d["fs_dec"] = bool(vfs)
++
++	# ---- 现在能做什么：每个交互别名的允许状态（替代"等N秒"）----
++	var acts := []
++	if pm != null:
++		for ba in pm.interactionBranchArray:
++			if ba == null:
++				continue
++			var ala := ""
++			if "interactionAlias" in ba:
++				ala = str(ba.interactionAlias)
++			if ala == "":
++				continue
++			var okb := false
++			if "interactionAllowed" in ba:
++				okb = bool(ba.interactionAllowed)
++			acts.append([ala, okb])
++	d["actions"] = acts
++	d["allowed"] = []
++	for a2 in acts:
++		if bool(a2[1]):
++			d["allowed"].append(str(a2[0]))
++
++	# ---- 鼠标当前指向什么（游戏自己的射线结果）----
++	var ho := ["", "", ""]
++	var imm = _dsh_mgr_cache.get("InteractionManager", null)
++	if imm != null and is_instance_valid(imm):
++		var ap = imm.get("activeParent")
++		if ap != null:
++			ho[0] = str(ap.name)
++			ho[1] = str(ap.get_path())
++		var ab = imm.get("activeInteractionBranch")
++		if ab != null and "interactionAlias" in ab:
++			ho[2] = str(ab.interactionAlias)
++	d["hover"] = ho
++
++	# ---- UI 空间诊断：搞清楚控件矩形到底在哪个坐标系 ----
++	var uip := {}
++	uip["vp_size"] = [int(get_viewport().get_visible_rect().size.x), int(get_viewport().get_visible_rect().size.y)]
++	uip["win_size"] = [int(DisplayServer.window_get_size().x), int(DisplayServer.window_get_size().y)]
++	var stv = get_viewport().get_screen_transform()
++	uip["screen_tf"] = [stv.x.x, stv.x.y, stv.y.x, stv.y.y, stv.origin.x, stv.origin.y]
++	var ctv = get_viewport().get_canvas_transform()
++	uip["canvas_tf"] = [ctv.x.x, ctv.x.y, ctv.y.x, ctv.y.y, ctv.origin.x, ctv.origin.y]
++	uip["content_scale"] = get_window().content_scale_factor if get_window() != null else -1.0
++	var kids := []
++	if _dsh_sss != null and is_instance_valid(_dsh_sss):
++		var bp2 = _dsh_sss.get("btnParent_shootingChoice")
++		if bp2 != null and bp2 is Control:
++			var rr2 = bp2.get_global_rect()
++			kids.append(["<parent>", str(bp2.get_class()), int(rr2.position.x), int(rr2.position.y), int(rr2.end.x), int(rr2.end.y), bool(bp2.visible), int(bp2.mouse_filter)])
++			for c7 in bp2.get_children():
++				if c7 == null:
++					continue
++				if c7 is Control:
++					var r7 = c7.get_global_rect()
++					kids.append([str(c7.name), str(c7.get_class()), int(r7.position.x), int(r7.position.y), int(r7.end.x), int(r7.end.y), bool(c7.visible), int(c7.mouse_filter)])
++				else:
++					kids.append([str(c7.name), str(c7.get_class()), -1, -1, -1, -1, false, -1])
++	uip["shooting_choice"] = kids
++	d["ui_probe"] = uip
++
++	# ---- 枪在哪（直接投影 shotgun 交互点，不用猜）----
++	d["gun_pt"] = []
++	if pm != null and cam != null:
++		for bg in pm.interactionBranchArray:
++			if bg != null and str(bg.interactionAlias) == "shotgun":
++				var pg3 = cam.unproject_position(bg.global_position)
++				var wsz = DisplayServer.window_get_size()
++				var vsz = get_viewport().get_visible_rect().size
++				d["gun_pt"] = [int(pg3.x * wsz.x / vsz.x), int(pg3.y * wsz.y / vsz.y), bool(bg.interactionAllowed)]
++				break
++
++	# ---- 能不能选目标（枪已在手）----
++	d["can_aim"] = false
++	var abtns := []
++	if _dsh_sss != null and is_instance_valid(_dsh_sss):
++		var bp = _dsh_sss.get("btnParent_shootingChoice")
++		if bp != null and bp is CanvasItem:
++			d["can_aim"] = bool(bp.visible)
++			if bp.visible:
++				var wz = DisplayServer.window_get_size()
++				var vz = get_viewport().get_visible_rect().size
++				for ch in bp.get_children():
++					if ch == null or not (ch is Control):
++						continue
++					var r5 = ch.get_global_rect()
++					var st5 = get_viewport().get_screen_transform()
++					var p5 = st5 * r5.position
++					var q5 = st5 * r5.end
++					abtns.append([str(ch.name),
++						int(p5.x), int(p5.y), int(q5.x), int(q5.y),
++						bool(ch.visible)])
++	d["aim_btns"] = abtns
++
++	# ---- 领奖箱 ----
++	d["latch_L_allowed"] = false
++	d["latch_R_allowed"] = false
++	d["lid_allowed"] = false
++	d["latch_L_raised"] = false
++	d["latch_R_raised"] = false
++	d["briefcase_ui"] = false
++	var bbtns := []
++	if _dsh_bcm != null and is_instance_valid(_dsh_bcm):
++		var bL = _dsh_bcm.get("intbranch_L")
++		if bL != null and "interactionAllowed" in bL:
++			d["latch_L_allowed"] = bool(bL.interactionAllowed)
++		var bR = _dsh_bcm.get("intbranch_R")
++		if bR != null and "interactionAllowed" in bR:
++			d["latch_R_allowed"] = bool(bR.interactionAllowed)
++		var bLid = _dsh_bcm.get("intbranch_lid")
++		if bLid != null and "interactionAllowed" in bLid:
++			d["lid_allowed"] = bool(bLid.interactionAllowed)
++		if "latchRaisedL" in _dsh_bcm:
++			d["latch_L_raised"] = bool(_dsh_bcm.latchRaisedL)
++		if "latchRaisedR" in _dsh_bcm:
++			d["latch_R_raised"] = bool(_dsh_bcm.latchRaisedR)
++		var bpar = _dsh_bcm.get("btnParent_briefcase")
++		if bpar != null and bpar is CanvasItem:
++			d["briefcase_ui"] = bool(bpar.visible)
++			if bpar.visible:
++				var wz2 = DisplayServer.window_get_size()
++				var vz2 = get_viewport().get_visible_rect().size
++				for chb in bpar.get_children():
++					if chb == null or not (chb is Control):
++						continue
++					var r6 = chb.get_global_rect()
++					var st6 = get_viewport().get_screen_transform()
++					var p6 = st6 * r6.position
++					var q6 = st6 * r6.end
++					bbtns.append([str(chb.name),
++						int(p6.x), int(p6.y), int(q6.x), int(q6.y),
++						bool(chb.visible)])
++	d["briefcase_btns"] = bbtns
++
++	# ---- 道具效果描述（游戏自带文案，1 秒刷新）----
++	var descs := []
++	for npk in _dsh_desc_nodes:
++		if npk == null or not is_instance_valid(npk):
++			continue
++		var inm4 = ""
++		if "itemName" in npk:
++			inm4 = str(npk.itemName)
++		var dsc4 = ""
++		if "itemDescription" in npk:
++			dsc4 = str(npk.itemDescription)
++		var sid4 = ""
++		if "whichSide" in npk:
++			sid4 = str(npk.whichSide)
++		var dgi4 := -1
++		if "dealerGridIndex" in npk:
++			dgi4 = int(npk.dealerGridIndex)
++		descs.append([inm4, dsc4, sid4, dgi4])
++	d["item_descriptions"] = descs
++
++	# ---- 整份倒：管理节点的全部简单属性 ----
++	var mgrs := {}
++	for w in _DSH_WANTED:
++		var node = _dsh_mgr_cache.get(str(w[1]), null)
++		if node != null and is_instance_valid(node):
++			var one = _dsh_dump_node(node)
++			# 完整弹序等于透视，剔掉；同时去掉引擎噪音字段
++			for bad in ["sequenceArray", "tempSequence", "sequenceArray_knownShell"]:
++				one.erase(bad)
++			for noise in ["process_mode", "process_physics_priority", "process_priority",
++					"process_thread_group", "process_thread_group_order", "process_thread_messages",
++					"scene_file_path", "unique_name_in_owner", "editor_description",
++					"resource_local_to_scene", "resource_name", "resource_path"]:
++				one.erase(noise)
++			mgrs[str(w[0])] = one
++	d["managers"] = mgrs
++	d["mgr_probe"] = _dsh_probe
++
++	# ---- 开场门 / 场景 / 坐标 ----
++	var doors := []
++	if _dsh_intro != null and is_instance_valid(_dsh_intro) and cam != null:
++		var d1 = _dsh_intro.get("intbranch_bathroomdoor")
++		if d1 != null:
++			var gp1 = d1.get("global_position")
++			if gp1 != null:
++				var p1 = cam.unproject_position(gp1)
++				doors.append(["bathroomdoor", int(p1.x), int(p1.y), true])
++		var d2 = _dsh_intro.get("intbranch_backroomdoor")
++		if d2 != null:
++			var gp2 = d2.get("global_position")
++			if gp2 != null:
++				var p2 = cam.unproject_position(gp2)
++				doors.append(["backroomdoor", int(p2.x), int(p2.y), true])
++	d["intro_targets"] = doors
++	d["socket"] = str(camera.activeSocket) if camera != null else ""
++	var vp_sz = get_viewport().get_visible_rect().size
++	var win_i = DisplayServer.window_get_size()
++	d["vp_size"] = [int(vp_sz.x), int(vp_sz.y)]
++	d["win_ds"] = [int(win_i.x), int(win_i.y)]
++	d["clicks"] = _dsh_clicks
++	d["last_click"] = _dsh_last_click
++	d["in_match"] = true
++	_dsh_focus_block(d)
++	d["dump_items"] = _dsh_dump_items
++	# ---- 屏幕对话框上的文字（合法：那就是画面上显示的）----
++	d["dialogue"] = ""
++	var dmx = _dsh_mgr_get("DialogueManager")
++	if dmx != null and "dialogueUI" in dmx:
++		var lblx = dmx.dialogueUI
++		if lblx != null and is_instance_valid(lblx) and bool(lblx.visible):
++			d["dialogue"] = str(lblx.text)
++
++	# ---- 结算画面是否已经"可以按任意键" ----
++	var emx = _dsh_mgr_get("EndingManager")
++	if emx != null and "waitingForInput" in emx:
++		d["ending_ready"] = bool(emx.waitingForInput)
++	else:
++		d["ending_ready"] = false
++
++	# ---- 偷道具状态（肾上腺素）----
++	var iist = _dsh_mgr_get("ItemInteraction")
++	var imst = _dsh_mgr_get("ItemManager")
++	if iist != null and "stealing" in iist:
++		d["stealing"] = bool(iist.stealing)
++	else:
++		d["stealing"] = false
++	if imst != null and "timer_steal_current" in imst:
++		d["steal_left"] = float(imst.timer_steal_max) - float(imst.timer_steal_current)
++	else:
++		d["steal_left"] = -1.0
++
++	# ---- 无尽模式（嗑药）----
++	if roundManager != null:
++		d["endless"] = bool(roundManager.endless)
++		d["double_score"] = int(roundManager.endscore)
++		d["double_prev"] = int(roundManager.prevscore)
++		d["rounds_beat"] = int(roundManager.double_or_nothing_rounds_beat)
++		d["doubled"] = bool(roundManager.doubled)
++
++	d["ms"] = int(Time.get_ticks_msec())
++
++	var f := FileAccess.open("C:/Users/<YOUR_USER>/Documents/deepseek-harness/default-workspace/out/br/state.json", FileAccess.WRITE)
++	if f != null:
++		f.store_string(JSON.stringify(d))
++		f.close()
++
++# ===================== 命令通道 =====================
++const _DSH_KOROOT := "C:/Users/<YOUR_USER>/Documents/deepseek-harness/default-workspace/out/br/"
++
++func _dsh_path(nm):
++	return _DSH_KOROOT + nm
++
++func _dsh_mgr_get(nm):
++	var n = _dsh_mgr_cache.get(nm, null)
++	if n != null and is_instance_valid(n):
++		return n
++	return null
++
++func _dsh_write_result(s):
++	var f = FileAccess.open(_dsh_path("cmd_result.txt"), FileAccess.WRITE)
++	if f != null:
++		f.store_string(s)
++		f.close()
++
++func _dsh_can_shoot_now():
++	var pm = _dsh_mgr_get("PermissionManager")
++	if pm == null:
++		return false
++	for b in pm.interactionBranchArray:
++		if b != null and str(b.interactionAlias) == "shotgun":
++			return bool(b.interactionAllowed)
++	return false
++
++func _dsh_can_aim_now():
++	var ss = _dsh_mgr_get("ShotgunShooting")
++	if ss == null:
++		return false
++	var bp = ss.get("btnParent_shootingChoice")
++	if bp == null or not (bp is CanvasItem):
++		return false
++	return bool(bp.visible)
++
++func _dsh_holding_item():
++	var im = _dsh_mgr_get("ItemManager")
++	if im == null or im.items_dynamicInteractionArray == null:
++		return ""
++	for it in im.items_dynamicInteractionArray:
++		if it != null and "isPlayerSide" in it and not bool(it.isPlayerSide):
++			return str(it.itemName).to_lower()
++	return ""
++
++func _dsh_socket_now():
++	if camera == null:
++		return ""
++	return str(camera.activeSocket)
++
++var _dsh_mag_until := 0
++var _dsh_dump_items = []
++
++
++func _dsh_cmd():
++	if not FileAccess.file_exists(_dsh_path("cmd.txt")):
++		return
++	var f = FileAccess.open(_dsh_path("cmd.txt"), FileAccess.READ)
++	if f == null:
++		return
++	var line = f.get_as_text().strip_edges()
++	f.close()
++	DirAccess.remove_absolute(_dsh_path("cmd.txt"))
++	if line == "":
++		return
++
++	var parts = line.split("|")
++	var verb = parts[0]
++	var arg = parts[1] if parts.size() > 1 else ""
++	var ok = false
++	var why = ""
++
++	if verb == "grab_gun":
++		var di3 = _dsh_mgr_get("DealerIntelligence")
++		var dhs3 := false
++		if di3 != null and "dealerHoldingShotgun" in di3:
++			dhs3 = bool(di3.dealerHoldingShotgun)
++		if dhs3:
++			why = "拒绝：枪在庄家手上"
++		elif _dsh_socket_now() != "home":
++			why = "拒绝：镜头不在我这边 socket=" + _dsh_socket_now()
++		elif not _dsh_can_shoot_now():
++			why = "拒绝：现在不能拿枪 can_shoot=false"
++		else:
++			var im9 = _dsh_mgr_get("InteractionManager")
++			if im9 == null:
++				why = "拒绝：找不到 InteractionManager"
++			else:
++				im9.call("InteractWith", "shotgun")
++				ok = true
++	elif verb == "shoot":
++		var sk2 = _dsh_socket_now()
++		var dhs := false
++		var di2 = _dsh_mgr_get("DealerIntelligence")
++		if di2 != null and "dealerHoldingShotgun" in di2:
++			dhs = bool(di2.dealerHoldingShotgun)
++		if arg != "dealer" and arg != "self":
++			why = "拒绝：目标只能是 dealer/self"
++		elif sk2 != "home":
++			why = "拒绝：镜头不在我这边 socket=" + sk2
++		elif not _dsh_can_aim_now():
++			why = "拒绝：选目标面板不可见 can_aim=false"
++		elif dhs:
++			why = "拒绝：枪在庄家手上 dealerHoldingShotgun=true"
++		else:
++			var im8 = _dsh_mgr_get("InteractionManager")
++			if im8 == null:
++				why = "拒绝：找不到 InteractionManager"
++			else:
++				# 必须走 InteractWith：它会 Shoot + decision.SetUI(false) + fs_dec=true
++				# 直接调 Shoot 会留下"庄家/你"标签，而且不上锁能重复开枪
++				im8.call("InteractWith", "text dealer" if arg == "dealer" else "text you")
++				ok = true
++	elif verb == "grab_item":
++		if _dsh_socket_now() != "briefcase":
++			why = "拒绝：不在道具阶段 socket=" + _dsh_socket_now()
++		else:
++			var im1 = _dsh_mgr_get("ItemManager")
++			if im1 == null:
++				why = "拒绝：找不到 ItemManager"
++			else:
++				im1.call("GrabItem")
++				ok = true
++	elif verb == "place":
++		if _dsh_holding_item() == "":
++			why = "refuse: not holding any item"
++		else:
++			var im2 = _dsh_mgr_get("ItemManager")
++			if im2 == null:
++				why = "refuse: no ItemManager"
++			else:
++				var gi = int(arg)
++				var size = im2.gridOccupiedArray.size()
++				var used = false
++				if gi >= 0 and gi < size:
++					if not bool(im2.gridOccupiedArray[gi]):
++						used = true
++				if not used:
++					for k in range(size):
++						if not bool(im2.gridOccupiedArray[k]):
++							gi = k
++							used = true
++							break
++				if not used:
++					why = "refuse: no free grid slot"
++				else:
++					im2.call("PlaceDownItem", gi)
++					ok = true
++	elif verb == "use":
++		var r5 = _dsh_use_item(arg)
++		if r5 == "":
++			ok = true
++			# 只有真的用掉了放大镜，才在接下来 15 秒里允许读下一发（模拟画面上的结果）
++			if str(arg) == "magnifying glass":
++				_dsh_mag_until = Time.get_ticks_msec() + 15000
++		else:
++			why = r5
++	elif verb == "sign":
++		var r7 = _dsh_sign_one(arg)
++		if r7 == "":
++			ok = true
++		else:
++			why = r7
++	elif verb == "dump_sign":
++		var rows = []
++		for sbx in _dsh_sign_buttons:
++			if sbx == null:
++				continue
++			if not is_instance_valid(sbx):
++				continue
++			var lax = ""
++			var sax = ""
++			var ibx = sbx.get("intbranch")
++			if ibx != null:
++				if "signatureButton_letterAlias" in ibx:
++					lax = str(ibx.signatureButton_letterAlias)
++				if "signatureButton_specialAlias" in ibx:
++					sax = str(ibx.signatureButton_specialAlias)
++			rows.append(str(sbx.name) + " letter=" + lax + " special=" + sax)
++		_dsh_sign_info = rows
++		ok = true
++	elif verb == "sign_enter":
++		var sg2 = _dsh_mgr_get("SignatureManager")
++		if sg2 == null:
++			why = "拒绝：找不到 SignatureManager"
++		else:
++			# 从分支扫描收集到的节点里找 ENTER 键（自己扫树扫不到，见 notes）
++			var hit_e = false
++			for nb in _dsh_branch_nodes:
++				if nb == null:
++					continue
++				if not is_instance_valid(nb):
++					continue
++				if str(nb.name).to_lower().find("branch_enter") >= 0:
++					var par_e = nb.get_parent()
++					if par_e != null:
++						# 带 Press() 的签名键脚本节点，是交互分支的"兄弟"（父节点的 child[0]）
++						var prt = null
++						var pp = par_e   # 脚本节点是交互分支的兄弟，就在同一个父节点下
++						if pp != null:
++							for ch in pp.get_children():
++								if ch != null and ch.has_method("Press"):
++									prt = ch
++									break
++						if prt == null and par_e.has_method("Press"):
++							prt = par_e
++						# （已改为兄弟查找）
++							pass
++						if prt != null and prt.has_method("Press"):
++							prt.call("Press")
++						# （已经在上面调过了）
++						hit_e = true
++						break
++			var nmall = []
++			for nb2 in _dsh_branch_nodes:
++				if nb2 != null and is_instance_valid(nb2):
++					nmall.append(str(nb2.name))
++			if hit_e:
++				await get_tree().create_timer(0.3, false).timeout
++			sg2.call("Input_Enter")
++			ok = true
++	elif verb == "sign_back":
++		var sg3 = _dsh_mgr_get("SignatureManager")
++		if sg3 == null:
++			why = "拒绝：找不到 SignatureManager"
++		else:
++			sg3.call("Input_Backspace")
++			ok = true
++	elif verb == "waiver":
++		var sg4 = _dsh_mgr_get("SignatureManager")
++		if sg4 == null:
++			why = "拒绝：找不到 SignatureManager"
++		else:
++			sg4.call("PickUpWaiver")
++			ok = true
++	elif verb == "latch":
++		var bc1 = _dsh_mgr_get("BriefcaseMachine")
++		if bc1 == null:
++			why = "拒绝：找不到 BriefcaseMachine"
++		elif arg != "L" and arg != "R":
++			why = "拒绝：卡扣只能是 L/R"
++		else:
++			bc1.call("OpenLatch", arg)
++			ok = true
++	elif verb == "lid":
++		var bc2 = _dsh_mgr_get("BriefcaseMachine")
++		if bc2 == null:
++			why = "拒绝：找不到 BriefcaseMachine"
++		else:
++			bc2.call("OpenLid")
++			ok = true
++	elif verb == "door_bathroom":
++		var in1 = _dsh_mgr_get("IntroManager")
++		if in1 == null:
++			why = "拒绝：找不到 IntroManager"
++		else:
++			in1.call("Interaction_BathroomDoor")
++			ok = true
++	elif verb == "door_backroom":
++		var in2 = _dsh_mgr_get("IntroManager")
++		if in2 == null:
++			why = "拒绝：找不到 IntroManager"
++		else:
++			in2.call("Interaction_BackroomDoor")
++			ok = true
++	elif verb == "heaven":
++		var hv = _dsh_mgr_get("HeavenManager")
++		if hv == null:
++			why = "拒绝：找不到 HeavenManager"
++		else:
++			hv.call("Fly")
++			ok = true
++	elif verb == "interact":
++		var pm2 = _dsh_mgr_get("PermissionManager")
++		var im3 = _dsh_mgr_get("InteractionManager")
++		if im3 == null:
++			why = "拒绝：找不到 InteractionManager"
++		elif arg == "":
++			why = "拒绝：没给别名"
++		else:
++			im3.call("InteractWith", arg)
++			ok = true
++	elif verb == "ending_exit":
++		var em = _dsh_mgr_get("EndingManager")
++		if em == null:
++			why = "no EndingManager"
++		else:
++			em.call("ExitGame")
++			ok = true
++	elif verb == "fix_grids":
++		var imf = _dsh_mgr_get("ItemManager")
++		if imf == null:
++			why = "refuse: no ItemManager"
++		else:
++			var nf = imf.gridOccupiedArray.size()
++			for kf in range(nf):
++				imf.gridOccupiedArray[kf] = false
++			for itf in imf.items_dynamicInteractionArray:
++				if itf == null:
++					continue
++				if not ("itemGridIndex" in itf):
++					continue
++				var psf = false
++				if "isPlayerSide" in itf:
++					psf = bool(itf.isPlayerSide)
++				if not psf:
++					continue
++				var gf = int(itf.itemGridIndex)
++				if gf >= 0 and gf < nf:
++					imf.gridOccupiedArray[gf] = true
++			var cntf := 0
++			for kf2 in range(nf):
++				if bool(imf.gridOccupiedArray[kf2]):
++					cntf += 1
++			imf.numberOfOccupiedGrids = cntf
++			ok = true
++	elif verb == "set_batch":
++		if roundManager == null:
++			why = "refuse: no roundManager"
++		else:
++			var nb = int(arg)
++			if nb < 0 or nb > 2:
++				why = "refuse: batch must be 0~2"
++			else:
++				roundManager.playerData.currentBatchIndex = nb
++				roundManager.call("MainBatchSetup", false)
++				ok = true
++	elif verb == "dump_items":
++		var imd = _dsh_mgr_get("ItemManager")
++		if imd == null:
++			why = "refuse: no ItemManager"
++		else:
++			var outp := []
++			var idx := 0
++			for itd in imd.items_dynamicInteractionArray:
++				if itd == null:
++					outp.append([idx, "NULL", "", false, -1, 0])
++				else:
++					var nmd := str(itd.itemName) if ("itemName" in itd) else "?"
++					var pls := bool(itd.isPlayerSide) if ("isPlayerSide" in itd) else false
++					var gid := int(itd.itemGridIndex) if ("itemGridIndex" in itd) else -999
++					var vis := false
++					if is_instance_valid(itd):
++						vis = itd.is_inside_tree()
++					outp.append([idx, "OK", nmd, pls, gid, int(itd.get_instance_id()) if is_instance_valid(itd) else -1, vis])
++				idx += 1
++			_dsh_dump_items = outp
++			ok = true
++	elif verb == "steal":
++		var ims = _dsh_mgr_get("ItemManager")
++		var iis = _dsh_mgr_get("ItemInteraction")
++		if ims == null or iis == null:
++			why = "refuse: missing manager"
++		elif arg == "":
++			why = "refuse: need item name"
++		else:
++			var found = false
++			for its in ims.items_dynamicInteractionArray:
++				if its == null:
++					continue
++				if not ("isPlayerSide" in its):
++					continue
++				if bool(its.isPlayerSide):
++					continue
++				if str(its.itemName) != arg:
++					continue
++				var par = its.get_parent()
++				iis.call("PickupItemFromTable", par, arg)
++				found = true
++				break
++			if found:
++				ok = true
++				# 偷到的放大镜是当场使用的，所以也该允许读下一发
++				if str(arg) == "magnifying glass":
++					_dsh_mag_until = Time.get_ticks_msec() + 15000
++			else:
++				why = "refuse: no dealer item named " + arg
++	else:
++		why = "拒绝：不认识的命令 " + verb
++
++	if ok:
++		_dsh_write_result("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++		print("[DSH] cmd ok: ", line)
++	else:
++		_dsh_write_result("ERR|" + line + "|" + why)
++		print("[DSH] cmd refused: ", line, " -> ", why)
++
++
++
++
++func _dsh_dbg(msg):
++	var f = FileAccess.open(_DSH_KOROOT + "sign_debug.txt", FileAccess.READ_WRITE)
++	if f == null:
++		f = FileAccess.open(_DSH_KOROOT + "sign_debug.txt", FileAccess.WRITE)
++	else:
++		f.seek_end()
++	if f != null:
++		f.store_string(str(msg) + "\n")
++		f.close()
++func _dsh_sign_one(letter):
++	# 找 letterAlias == letter 的签名键，输入 + 播放按键动画
++	var sg = _dsh_mgr_get("SignatureManager")
++	if sg == null:
++		return "拒绝：找不到 SignatureManager"
++	for sb in _dsh_sign_buttons:
++		if sb == null or not is_instance_valid(sb):
++			continue
++		var ib = sb.get("intbranch")
++		if ib == null:
++			continue
++		var la := ""
++		if "signatureButton_letterAlias" in ib:
++			la = str(ib.signatureButton_letterAlias)
++		if la == letter:
++			var sa := ""
++			if "signatureButton_specialAlias" in ib:
++				sa = str(ib.signatureButton_specialAlias)
++			sg.call("GetInput", la, sa)
++			sb.call("Press")
++			return ""
++	# 没找到对应键（比如字母不在键盘上）就只输入，不动画
++	sg.call("Input_Letter", letter)
++	return ""
++
++func _dsh_use_item(arg):
++	# 必须走 PickupItemFromTable：它内部依次做
++	#   RemovePlayerItemFromGrid -> queue_free -> InteractWith
++	# 只调 InteractWith 会留下桌上的模型（实测过）
++	var ii = _dsh_mgr_get("ItemInteraction")
++	var im = _dsh_mgr_get("ItemManager")
++	if ii == null or im == null:
++		return "拒绝：找不到 ItemInteraction/ItemManager"
++	if im.items_dynamicInteractionArray == null:
++		return "拒绝：道具数组为空"
++	for it in im.items_dynamicInteractionArray:
++		if it == null:
++			continue
++		if "isPlayerSide" in it and not bool(it.isPlayerSide):
++			continue
++		if str(it.itemName).to_lower() == arg:
++			var par = it.get_parent()
++			if par == null:
++				return "拒绝：道具没有父节点"
++			ii.call("PickupItemFromTable", par, arg)
++			return ""
++	return "拒绝：桌上找不到 " + arg
++
++func d_get_items():
++	var out := []
++	var im = _dsh_mgr_get("ItemManager")
++	if im == null:
++		return out
++	if im.items_dynamicInteractionArray != null:
++		for it in im.items_dynamicInteractionArray:
++			if it != null:
++				out.append(str(it.itemName).to_lower())
++	return out
++
++
++# ===== DSH FOCUS BLOCK =====
++# 只读：现在谁有焦点、控制器模式开没开、射击目标按钮能不能被键盘导航到、
++# 按下回车会连到哪个对象的哪个方法。
++func _dsh_focus_block(d):
++	var fb := {}
++	var fo = null
++	var vp = get_viewport()
++	if vp != null:
++		fo = vp.gui_get_focus_owner()
++	if fo != null and is_instance_valid(fo):
++		fb["owner"] = [str(fo.name), str(fo.get_path()), str(fo.get_class()), int(fo.focus_mode)]
++	else:
++		fb["owner"] = ["", "", "", -1]
++	var cm = _dsh_mgr_get("ControllerManager")
++	if cm != null:
++		var pf = cm.get("previousFocus")
++		var pfn := ""
++		var pfp := ""
++		if pf != null and is_instance_valid(pf):
++			pfn = str(pf.name)
++			if pf.is_inside_tree():
++				pfp = str(pf.get_path())
++		fb["previous"] = [pfn, pfp]
++		fb["fs1"] = bool(cm.get("fs1"))
++		fb["fs2"] = bool(cm.get("fs2"))
++		fb["enabled"] = bool(cm.get("controller_currently_enabled"))
++	var cur2 = _dsh_mgr_get("CursorManager")
++	if cur2 != null:
++		fb["cursor_active"] = bool(cur2.get("controller_active"))
++		fb["cursor_visible"] = bool(cur2.get("cursor_visible"))
++	var kids := []
++	var ss = _dsh_mgr_get("ShotgunShooting")
++	if ss != null:
++		var bp = ss.get("btnParent_shootingChoice")
++		if bp != null and is_instance_valid(bp):
++			fb["parent_visible"] = bool(bp.visible)
++			var byou = ss.get("btn_you")
++			if byou != null and is_instance_valid(byou):
++				fb["btn_you"] = [str(byou.name), str(byou.get_path())]
++			for ch in bp.get_children():
++				if ch == null or not (ch is Control):
++					continue
++				var one := []
++				one.append(str(ch.name))
++				one.append(str(ch.get_class()))
++				one.append(bool(ch.visible))
++				one.append(int(ch.focus_mode))
++				one.append([str(ch.focus_neighbor_left), str(ch.focus_neighbor_top), str(ch.focus_neighbor_right), str(ch.focus_neighbor_bottom)])
++				var cons := []
++				for c in ch.get_signal_connection_list("pressed"):
++					var cb = c.get("callable")
++					if cb != null:
++						var ob = cb.get_object()
++						var on := ""
++						var op := ""
++						if ob != null and is_instance_valid(ob):
++							on = str(ob.name)
++							if ob.is_inside_tree():
++								op = str(ob.get_path())
++						cons.append([str(cb.get_method()), on, op])
++				one.append(cons)
++				var hf := false
++				if fo != null and is_instance_valid(fo) and fo == ch:
++					hf = true
++				one.append(hf)
++				kids.append(one)
++	fb["shooting_choice"] = kids
++	fb["focusables"] = _dsh_focusables
++	d["focus"] = fb

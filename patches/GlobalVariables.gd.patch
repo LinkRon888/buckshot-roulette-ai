@@ -1,0 +1,202 @@
+--- scripts/GlobalVariables.gd
++++ scripts/GlobalVariables.gd
+@@ -312,3 +312,199 @@
+ 			index -= 1
+ 	TranslationServer.set_locale(language_array[index])
+ 	print("setting locale to: ", language_array[index])
++
++
++# ===== DSH scene probe (autoload) =====
++var _dsh_t := 0.0
++var _dsh_sock_node = null
++var _dsh_scan_cd := 0.0
++
++func _dsh_scan():
++	var all = get_tree().root.find_children("*", "", true, false)
++	for n in all:
++		if n == null:
++			continue
++		if "activeSocket" in n:
++			_dsh_sock_node = n
++			return n
++	return null
++
++
++# ===== 菜单命令通道（autoload，全程可用）=====
++const _DSH_ROOT2 := "C:/Users/<YOUR_USER>/Documents/deepseek-harness/default-workspace/out/br/"
++
++var _dsh_menu_mgr = null
++
++
++func _dsh_find_menu():
++	if _dsh_menu_mgr != null and is_instance_valid(_dsh_menu_mgr):
++		return _dsh_menu_mgr
++	var stack = [get_tree().root]
++	var g := 0
++	while stack.size() > 0 and g < 30000:
++		g += 1
++		var n = stack.pop_back()
++		if n == null:
++			continue
++		var sc = n.get_script()
++		if sc != null and str(sc.resource_path).get_file() == "MenuManager.gd":
++			_dsh_menu_mgr = n
++			return n
++		for c in n.get_children():
++			stack.push_back(c)
++	return null
++
++
++func _dsh_menu_write(s):
++	var f = FileAccess.open(_DSH_ROOT2 + "cmd_menu_result.txt", FileAccess.WRITE)
++	if f != null:
++		f.store_string(s)
++		f.close()
++
++
++var _dsh_heaven = null
++
++
++func _dsh_find_heaven():
++	if _dsh_heaven != null and is_instance_valid(_dsh_heaven):
++		return _dsh_heaven
++	var stack = [get_tree().root]
++	var g := 0
++	while stack.size() > 0 and g < 30000:
++		g += 1
++		var n = stack.pop_back()
++		if n == null:
++			continue
++		var sc = n.get_script()
++		if sc != null and str(sc.resource_path).get_file() == "HeavenManager.gd":
++			_dsh_heaven = n
++			return n
++		for c in n.get_children():
++			stack.push_back(c)
++	return null
++
++
++func _dsh_menu_cmd():
++	var path = _DSH_ROOT2 + "cmd_menu.txt"
++	if not FileAccess.file_exists(path):
++		return
++	var f = FileAccess.open(path, FileAccess.READ)
++	if f == null:
++		return
++	var line = f.get_as_text().strip_edges()
++	f.close()
++	DirAccess.remove_absolute(path)
++	if line == "":
++		return
++	var verb = line.split("|")[0]
++	if verb == "heaven_door":
++		var hvd = _dsh_find_heaven()
++		if hvd == null:
++			_dsh_menu_write("ERR|" + line + "|no Heaven node in current scene")
++		else:
++			hvd.call("Fly")
++			_dsh_menu_write("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++			print("[DSH] heaven_door ok")
++		return
++	if verb == "heaven_retry":
++		var hv = _dsh_find_heaven()
++		if hv == null:
++			_dsh_menu_write("ERR|" + line + "|no Heaven node in current scene")
++		else:
++			hv.call("Button_Retry")
++			_dsh_menu_write("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++			print("[DSH] heaven_retry ok")
++		return
++	var mm = _dsh_find_menu()
++	if mm == null:
++		_dsh_menu_write("ERR|" + line + "|找不到 MenuManager")
++		return
++	if verb == "menu_start":
++		mm.call("Start")
++		_dsh_menu_write("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++		print("[DSH] menu_start ok")
++	elif verb == "menu_quit":
++		mm.call("Exit")
++		_dsh_menu_write("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++	elif verb == "menu_credits":
++		mm.call("Credits")
++		_dsh_menu_write("OK|" + line + "|ms=" + str(Time.get_ticks_msec()))
++	else:
++		_dsh_menu_write("ERR|" + line + "|不认识的菜单命令 " + verb)
++
++
++func _process(delta):
++	_dsh_t += delta
++	if _dsh_t < 0.25:
++		return
++	_dsh_t = 0.0
++	var scn = get_tree().current_scene
++	var d := {}
++	d["scene"] = str(scn.name) if scn != null else ""
++	var sn = _dsh_sock_node
++	if sn != null and not is_instance_valid(sn):
++		sn = null
++		_dsh_sock_node = null
++	if sn == null:
++		_dsh_scan_cd -= 0.25
++		if _dsh_scan_cd <= 0.0:
++			_dsh_scan_cd = 2.0
++			sn = _dsh_scan()
++	d["sock_node"] = str(sn.name) if sn != null else ""
++	d["socket"] = str(sn.activeSocket) if sn != null else ""
++	# 树清单：找带 CameraManager 脚本的节点（诊断用，最多 60 个）
++	if _dsh_scan_cd >= 1.99:
++		var names := []
++		var all2 = get_tree().root.find_children("*", "", true, false)
++		for n2 in all2:
++			if n2 == null:
++				continue
++			var sp := ""
++			var s2 = n2.get_script()
++			if s2 != null:
++				sp = str(s2.resource_path)
++			if sp.find("amera") >= 0:
++				names.append([str(n2.name), sp.get_file()])
++				if names.size() >= 60:
++					break
++		d["cam_nodes"] = names
++		d["total_nodes"] = all2.size()
++	var inl := []
++	for n3 in get_tree().root.find_children("*", "", true, false):
++		if n3 == null:
++			continue
++		var nm3 := str(n3.name).to_lower()
++		if nm3.find("intro") >= 0:
++			inl.append([str(n3.name), str(n3.get_path())])
++	d["intro_nodes"] = inl
++	var hv5 = _dsh_find_heaven()
++	if hv5 != null:
++		var doorok := false
++		var ib5 = hv5.get("intbranch_heavendoor")
++		if ib5 != null and "interactionAllowed" in ib5:
++			doorok = bool(ib5.interactionAllowed)
++		var btnok := false
++		var ba5 = hv5.get("buttonArray")
++		if ba5 != null and ba5.size() > 0:
++			var b05 = ba5[0]
++			if b05 != null and "isActive" in b05:
++				btnok = bool(b05.isActive)
++		d["heaven_door_ok"] = doorok
++		d["heaven_buttons"] = btnok
++		var bv = hv5.get("btn_retry")
++		var bvis := false
++		var balpha := 0.0
++		if bv != null and is_instance_valid(bv):
++			bvis = bool(bv.visible)
++			if "modulate" in bv:
++				balpha = float(bv.modulate.a)
++		d["heaven_btn_vis"] = bvis
++		d["heaven_btn_alpha"] = balpha
++	d["is_heaven"] = str(scn.name).to_lower().find("heaven") >= 0 if scn != null else false
++	d["is_death"] = str(scn.name).to_lower().find("death") >= 0 if scn != null else false
++	d["ms"] = int(Time.get_ticks_msec())
++	var f := FileAccess.open("C:/Users/<YOUR_USER>/Documents/deepseek-harness/default-workspace/out/br/scene.json", FileAccess.WRITE)
++	if f != null:
++		f.store_string(JSON.stringify(d))
++		f.close()
++	_dsh_menu_cmd()

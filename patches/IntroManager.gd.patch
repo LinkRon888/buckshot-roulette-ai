@@ -1,0 +1,32 @@
+--- scripts/IntroManager.gd
++++ scripts/IntroManager.gd
+@@ -84,7 +84,7 @@
+ 	await get_tree().create_timer(.5, false).timeout
+ 	viewblocker.visible = false
+ 	MainTrackLoad()
+-	await get_tree().create_timer(3, false).timeout
++	await get_tree().create_timer(1, false).timeout
+ 	Hint()
+ 	cursor.SetCursor(true, true)
+ 	intbranch_bathroomdoor.interactionAllowed = true
+@@ -127,9 +127,9 @@
+ 	#tr("GAME_STATUS_%d" % status_index)
+ 	var secondpart = "\n"+tr("THE NIGHT")
+ 	var full = firstpart + secondpart
+-	await get_tree().create_timer(4, false).timeout
++	await get_tree().create_timer(1.5, false).timeout
+ 	dia.ShowText_Forever(full)
+-	await get_tree().create_timer(4, false).timeout
++	await get_tree().create_timer(1.5, false).timeout
+ 	dia.HideText()
+ 	animator_pp.play("brightness fade out")
+ 	await get_tree().create_timer(2.05, false).timeout
+@@ -137,7 +137,7 @@
+ 	RestRoomIdle()
+ 	animator_pp.play("brightness fade in")
+ 	dia.speaker_click.stream = dia.soundArray_clicks[3]
+-	await get_tree().create_timer(3, false).timeout
++	await get_tree().create_timer(1, false).timeout
+ 	cursor.SetCursor(true, true)
+ 	if (allowingPills): 
+ 		intbranch_pillbottle.interactionAllowed = true

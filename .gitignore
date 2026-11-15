@@ -1,0 +1,28 @@
+# 游戏文件（不能提交：版权 + 体积）
+*.pck
+out/pckall/
+out/br/patch/scripts/*.gd
+
+# 运行时产物
+out/br/state.json
+out/br/scene.json
+out/br/cmd*.txt
+out/br/decision.txt
+out/br/need_decision.txt
+out/br/think.txt
+out/br/*.pid
+out/br/*.png
+out/br/*.txt
+out/br/*.log
+
+# 备份
+out/br/backup/
+
+# 系统
+Thumbs.db
+.DS_Store
+__pycache__/
+*.pyc
+
+# 打包产物
+*.zip
