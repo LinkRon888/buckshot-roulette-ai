@@ -851,16 +851,15 @@ def main():
             _fail = globals().get("_strict_fail", 0)
             if not _bad:
                 globals()["_strict_fail"] = 0
-            if _bad and _fail < 2:
-                globals()["_strict_fail"] = _fail + 1
-                log("  !! 决策里点名的 %s 不在手上（实际有 %s）-> 整条决策退回，重问（第 %d 次）"
-                    % (", ".join(_bad), "、".join(_inv) or "无", _fail + 1))
-                os.remove(NEED)
-                continue
             if _bad:
-                log("  !! 连续两次点名不存在的道具 -> 放弃道具部分，只执行 shot（%s）" % (shot or "无"))
-                globals()["_strict_fail"] = 0
-                uses = []          # 不 continue：直接往下执行 shot，别回到重问（那样会死循环）
+                # 【2026-11-15 修】原来这里是 os.remove(NEED) + continue，
+                # 实测会死锁：主循环下一轮没重新判定到「该决策」，文件被删了却不再重写，
+                # 游戏明明还能开枪（socket=home, can_shoot=True）却卡住不动 2 分钟。
+                # 现在改成：丢掉不存在的道具，其余部分照常执行 —— 不删文件、不 continue。
+                log("  !! 决策里点名的 %s 不在手上（实际有 %s）-> 只丢掉这几件，继续执行"
+                    % (", ".join(_bad), "、".join(_inv) or "无"))
+                globals()["_strict_fail"] = globals().get("_strict_fail", 0) + 1
+                uses = [u for u in uses if u in _inv]
             if not uses and shot is None and steal_target is None:
                 log('[决策] !! 无法解析 %r —— 应该写 self / dealer / use:X;shoot:Y' % dec)
                 log('[决策]    3 秒后重问，先别慌')
