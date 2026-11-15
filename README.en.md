@@ -7,8 +7,6 @@
 
 ![The status HUD](docs/screenshots/hud-en.png)
 
-> 🎬 The demo GIF isn't recorded yet — screenshot placeholder for now. `docs/screenshots/` also has a Chinese panel, a scaled-down panel and a widescreen one.
-
 ---
 
 ## The lazy path: let the AI install it

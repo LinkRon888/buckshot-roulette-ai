@@ -7,8 +7,6 @@
 
 ![演示](docs/screenshots/demo.gif)
 
-> 🎬 演示动图还没录，先用截图占位 —— `docs/screenshots/` 里另有英文面板、缩放版、宽屏版各一张。
-
 ---
 
 ## 最省事的路：让 AI 自己装
