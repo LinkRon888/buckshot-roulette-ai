@@ -642,6 +642,52 @@ def main():
     # 否则新用户/新会话第一眼看到的就是「游戏开了但停在浴室不动」。
     # 注意：只有"还没见过任何非菜单场景"时才自动开，中途重启循环不会误判。
     _first_boot = True
+    # ---------- 局数控制（2026-11-20 加）----------
+    # 用户没说要打几局时：每局结束都问「要继续吗」（原有行为）。
+    # 把想打的局数写进 out/br/target_games.txt（一个数字），循环会自动连打那么多局，
+    # 打完就停并清掉这个文件 —— 这样「说打一局」就真的只打一局。
+    _TARGET = os.path.join("out", "br", "target_games.txt")
+    _DONE = os.path.join("out", "br", "games_done.txt")
+    MENU_CMD = os.path.join("out", "br", "cmd_menu.txt")
+    MENU_RES = os.path.join("out", "br", "cmd_menu_result.txt")
+
+    def _read_target_games():
+        """读目标局数；没有文件或读不出来就返回 None（= 每局都问）。"""
+        try:
+            if not os.path.exists(_TARGET):
+                return None
+            n = int(open(_TARGET, encoding="utf-8").read().strip())
+            return n if n > 0 else None
+        except Exception:
+            return None
+
+    def _read_games_done():
+        try:
+            if not os.path.exists(_DONE):
+                return 0
+            return int(open(_DONE, encoding="utf-8").read().strip())
+        except Exception:
+            return 0
+
+    def _write_games_done(n):
+        try:
+            with open(_DONE, "w", encoding="utf-8") as f:
+                f.write(str(int(n)))
+        except Exception:
+            pass
+
+    def _menu_start():
+        """让 mod 回菜单开一局。"""
+        try:
+            if os.path.exists(MENU_RES):
+                os.remove(MENU_RES)
+        except Exception:
+            pass
+        with open(MENU_CMD, "w", encoding="utf-8") as f:
+            f.write("menu_start")
+
+    menu_since = time.time()   # 进入菜单的时刻（用于「menu_start 没生效」的解锁判断）
+    menu_silent = False        # 用户答过 no 之后为 True：安静待着，不再自动追问
     item_retry = 0           # 道具阶段重跑次数（<3）
     item_done_at = 0          # 道具阶段"做完"的时间戳（用来判断是不是真卡住）
     pill_answered = False   # 同一次洗手间里问过药瓶就不再问（选 ✘ 后药瓶仍可点，会无限追问）
@@ -725,40 +771,62 @@ def main():
             if not ask_next_game and _first_boot:
                 # 本次启动第一次见菜单：直接开一局，不打扰用户
                 _first_boot = False
-                res0 = os.path.join("out", "br", "cmd_menu_result.txt")
-                try:
-                    if os.path.exists(res0): os.remove(res0)
-                except Exception:
-                    pass
-                with open(os.path.join("out", "br", "cmd_menu.txt"), "w", encoding="utf-8") as f:
-                    f.write("menu_start")
+                _menu_start()
                 log("  首次启动 -> 直接开一局（不问）")
+                menu_since = time.time()
                 time.sleep(1.5)
                 continue
+            # ---------- 局数控制（2026-11-20 加）----------
+            # target_games.txt 里有数字 N：自动连打到 N 局，打完清掉文件再正常提问。
+            # 先处理「答过 yes 但 menu_start 没生效」：60 秒后解锁重问。
+            # 答过 no 则 menu_silent=True，安静待着 —— 想继续就手动写
+            # out/br/cmd_menu.txt = menu_start（mod 会去开一局）。
+            if ask_next_game and not menu_silent and (time.time() - menu_since) > 60:
+                ask_next_game = False
+                log('  menu_start 好像没生效（菜单待机 >60s）-> 解锁重问')
+            if not ask_next_game:
+                _tg = _read_target_games()
+                if _tg is not None:
+                    _done = _read_games_done() + 1
+                    _write_games_done(_done)
+                    if _done < _tg:
+                        _menu_start()
+                        log('  局数 %d/%d -> 自动开下一局' % (_done, _tg))
+                        ask_next_game = True
+                        menu_since = time.time()
+                        time.sleep(1.5)
+                        continue
+                    else:
+                        log('  已打满 %d 局（目标 %d）-> 停下来问' % (_done, _tg))
+                        _write_games_done(0)
+                        try:
+                            os.remove(_TARGET)
+                        except Exception:
+                            pass
+                        # 不 continue：往下走正常提问，让用户决定还要不要
             if not ask_next_game:
                 dec = ask(T['askEnd'],
                           [('yes', T['askEndYes']),
                            ('no', T['askEndNo'])])
                 if dec:
                     ask_next_game = True
+                    menu_since = time.time()
                     if dec == 'yes':
-                        res = os.path.join('out', 'br', 'cmd_menu_result.txt')
-                        try:
-                            if os.path.exists(res): os.remove(res)
-                        except Exception:
-                            pass
-                        with open(os.path.join('out', 'br', 'cmd_menu.txt'), 'w', encoding='utf-8') as f:
-                            f.write('menu_start')
+                        _menu_start()
+                        menu_silent = False
                         log('  再来一局 -> menu_start')
                         time.sleep(1.5)
                     else:
-                        log('  停在菜单（你说停）')
+                        menu_silent = True
+                        log('  停在菜单（你说停）—— 想继续就写 out/br/cmd_menu.txt = menu_start')
                 continue
             time.sleep(0.2)
             continue
         # 已经离开菜单（scene 变了）才允许下次再问 ——
         # 之前在这里立刻重置，导致 menu_start 生效前的 17 秒里重复弹同一个决策点
         ask_next_game = False
+        menu_silent = False
+        menu_since = time.time()
         d = rd(STATE)
         if str(d.get('socket')) != 'briefcase':
             item_retry = 0        # 离开道具阶段就清零
