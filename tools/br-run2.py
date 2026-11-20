@@ -693,9 +693,12 @@ def main():
     _run_snapshot = False      # 这一局的快照记过没（每局只记一次）
     _prev_hp = 0               # 上一次看到的 hp_player（用来检测"归零"）
     _counted_by_wins = False   # 普通模式这一局已经因为"拿到钱"计过了（避免重复）
+    _auto_next_mode = None     # 自动连打中的模式：True=无尽 False=普通 None=不连打（每局都问）
 
     def _count_game(why):
-        """一局打完：计数 +1，没打满就自动开下一局；打满就停下来问。"""
+        """一局打完：计数 +1，没打满就自动开下一局（下局的药瓶沿用本局模式）；
+        打满就停下来问。"""
+        nonlocal _auto_next_mode
         _tg = _read_target_games()
         if _tg is None:
             log('  （没设 target_games.txt，不计数；只记录：%s）' % why)
@@ -704,9 +707,12 @@ def main():
         _write_games_done(_n)
         if _n < _tg:
             log('  局数 %d/%d -> 自动开下一局' % (_n, _tg))
-            _menu_start()
+            # 无尽模式死后游戏会自己回浴室 —— 发 menu_start 没用（实测无效）。
+            # 所以这里只设一个标志，让药瓶那一步自动沿用上一局的模式。
+            _auto_next_mode = bool(_run_endless)
         else:
             log('  已打满 %d 局（目标 %d）-> 停下来问' % (_n, _tg))
+            _auto_next_mode = None
             _write_games_done(0)
             try:
                 os.remove(_TARGET)
@@ -1116,9 +1122,16 @@ def main():
 
         # ---------- 2.5) 药瓶：先问我，再点（不要点了才问，那样太慢）----------
         if allowed('pill bottle') and not pill_answered:
-            dec = ask(T['askPill'].format(e=bool(d.get('endless'))),
-                      [('yes', T['askPillYes']),
-                       ('no', T['askPillNo'])])
+            # 自动连打中（局数还没打满）就不问药瓶，直接沿用上一局的模式。
+            # 用户 2026-11-20 定的：说了打 N 局就自动打，别每局都弹选择题。
+            if _auto_next_mode is not None:
+                dec = 'yes' if _auto_next_mode else 'no'
+                log('  自动连打：药瓶沿用上一局模式（%s），不问' %
+                    ('无尽' if _auto_next_mode else '普通'))
+            else:
+                dec = ask(T['askPill'].format(e=bool(d.get('endless'))),
+                          [('yes', T['askPillYes']),
+                           ('no', T['askPillNo'])])
             if dec:
                 pill_answered = True
                 if dec == 'no':
