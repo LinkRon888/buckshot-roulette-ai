@@ -691,6 +691,27 @@ def main():
     _run_endless = False       # 这一局是无尽模式吗（离开菜单时从 state.endless 记下来）
     _run_wins = 0              # 开局时的 wins，用来判断普通模式下"这局拿到钱了吗"
     _run_snapshot = False      # 这一局的快照记过没（每局只记一次）
+    _prev_hp = 0               # 上一次看到的 hp_player（用来检测"归零"）
+    _counted_by_wins = False   # 普通模式这一局已经因为"拿到钱"计过了（避免重复）
+
+    def _count_game(why):
+        """一局打完：计数 +1，没打满就自动开下一局；打满就停下来问。"""
+        _tg = _read_target_games()
+        if _tg is None:
+            log('  （没设 target_games.txt，不计数；只记录：%s）' % why)
+            return
+        _n = _read_games_done() + 1
+        _write_games_done(_n)
+        if _n < _tg:
+            log('  局数 %d/%d -> 自动开下一局' % (_n, _tg))
+            _menu_start()
+        else:
+            log('  已打满 %d 局（目标 %d）-> 停下来问' % (_n, _tg))
+            _write_games_done(0)
+            try:
+                os.remove(_TARGET)
+            except Exception:
+                pass
     item_retry = 0           # 道具阶段重跑次数（<3）
     item_done_at = 0          # 道具阶段"做完"的时间戳（用来判断是不是真卡住）
     pill_answered = False   # 同一次洗手间里问过药瓶就不再问（选 ✘ 后药瓶仍可点，会无限追问）
@@ -764,6 +785,43 @@ def main():
         heaven_seen_at = None
         heaven_text_at = None
         heaven_door_at = None
+        # ---------- 局数计数（2026-11-20 修）----------
+        # 用户定的语义：
+        #   无尽模式：一次死亡 = 一局（实测死后直接回浴室，不经过菜单）
+        #   普通模式：打完 3 小关开箱拿到钱 = 一局（中途死在"天堂"界面选重试，不算）
+        # 所以计数点不能放菜单，要放在"死亡"和"wins 增长"这两个事件上。
+        if scn != 'menu':
+            # 注意：这里的 d 还没被读出来（d = rd(STATE) 在后面），所以自己读一次
+            dd = rd(STATE)
+            try:
+                _hp = int(dd.get("hp_player") or 0)
+                _in_match = bool(dd.get("in_match"))
+            except Exception:
+                _hp, _in_match = 0, False
+            if _in_match and _prev_hp > 0 and _hp <= 0 and not _run_endless:
+                # 普通模式死掉：进天堂选重试，不算一局
+                log('  普通模式死亡（会重试同一个小关）-> 不计入局数')
+                _prev_hp = _hp
+            elif _prev_hp > 0 and _hp <= 0:
+                # 无尽模式死亡 = 这局结束
+                log('  ☠ 无尽模式死亡 -> 这局结束，计入局数')
+                _count_game('无尽模式死亡')
+                _prev_hp = _hp
+            else:
+                if _hp > 0:
+                    _prev_hp = _hp
+            # 普通模式：开箱拿到钱（wins +1）才算一局
+            if not _run_endless and not _counted_by_wins:
+                try:
+                    _w = int(dd.get("wins") or 0)
+                except Exception:
+                    _w = 0
+                if _w > _run_wins:
+                    log('  💰 普通模式拿到钱（wins %d->%d）-> 这局结束，计入局数'
+                        % (_run_wins, _w))
+                    _count_game('普通模式拿钱')
+                    _run_wins = _w
+                    _counted_by_wins = True
         # 菜单状态下 state.json 是旧的（HealthCounter 不存在），不能拿它做判断
         if scn == 'menu':
             cash_seen = None
@@ -788,42 +846,6 @@ def main():
             if ask_next_game and not menu_silent and (time.time() - menu_since) > 60:
                 ask_next_game = False
                 log('  menu_start 好像没生效（菜单待机 >60s）-> 解锁重问')
-            if not ask_next_game:
-                _tg = _read_target_games()
-                if _tg is not None:
-                    # 「一局」的判定要看模式（用户 2026-11-20 明确）：
-                    #   无尽模式：一次死亡 = 一局（死亡会直接回菜单）
-                    #   普通模式：打完 3 小关、开箱拿到钱 = 一局
-                    #            中途死掉会进「天堂」界面选重试，不是回菜单，所以不会误计；
-                    #            但如果在天堂选「退出」也会回菜单 —— 那种没拿到钱，不该算。
-                    # 判据就用游戏自己的 wins：普通模式里只有开箱拿到钱它才 +1。
-                    _run_over = True
-                    if not _run_endless:
-                        try:
-                            _w_now = int(rd(STATE).get("wins") or 0)
-                        except Exception:
-                            _w_now = 0
-                        _run_over = _w_now > _run_wins
-                        if not _run_over:
-                            log('  普通模式：这局没拿到钱（wins 没变 %d）-> 不计入局数' % _w_now)
-                    if _run_over:
-                        _done = _read_games_done() + 1
-                        _write_games_done(_done)
-                        if _done < _tg:
-                            _menu_start()
-                            log('  局数 %d/%d -> 自动开下一局' % (_done, _tg))
-                            ask_next_game = True
-                            menu_since = time.time()
-                            time.sleep(1.5)
-                            continue
-                        else:
-                            log('  已打满 %d 局（目标 %d）-> 停下来问' % (_done, _tg))
-                            _write_games_done(0)
-                            try:
-                                os.remove(_TARGET)
-                            except Exception:
-                                pass
-                            # 不 continue：往下走正常提问，让用户决定还要不要
             if not ask_next_game:
                 dec = ask(T['askEnd'],
                           [('yes', T['askEndYes']),
