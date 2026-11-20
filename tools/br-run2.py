@@ -1127,6 +1127,10 @@ def main():
                            ('no', T['askPillNo'])])
             if dec:
                 pill_answered = True
+                # 答完药瓶 = 新一局开始：强制重新记模式快照。
+                # 不重置的话，从"死亡"到"药瓶"不经过菜单，_run_snapshot 一直是 True，
+                # 普通模式会被当成无尽模式（实测踩过）。
+                _run_snapshot = False
                 if dec == 'no':
                     # 普通模式：**不碰药瓶**，直接去开浴室门
                     log('  普通模式：不点药瓶，直接开浴室门')
