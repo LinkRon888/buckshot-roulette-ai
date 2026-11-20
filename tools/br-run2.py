@@ -816,25 +816,18 @@ def main():
             else:
                 if _hp > 0:
                     _prev_hp = _hp
-            # 普通模式：开箱拿到钱（wins +1）才算一局
-            if not _run_endless and not _counted_by_wins:
-                try:
-                    _w = int(dd.get("wins") or 0)
-                except Exception:
-                    _w = 0
-                if _w > _run_wins:
-                    log('  💰 普通模式拿到钱（wins %d->%d）-> 这局结束，计入局数'
-                        % (_run_wins, _w))
-                    _count_game('普通模式拿钱')
-                    _run_wins = _w
-                    _counted_by_wins = True
         # 菜单状态下 state.json 是旧的（HealthCounter 不存在），不能拿它做判断
         if scn == 'menu':
             cash_seen = None
-            _run_snapshot = False   # 回到菜单 = 下一局重新记快照
             idle += 1
             if idle % 20 == 0:
                 log('在菜单待机')
+            # 普通模式：3 小关全打完 + 开箱 = 真的打完一局，这时才回到菜单。
+            # 所以普通模式的计数点就在菜单（无尽模式死后不回菜单，用死亡计数）。
+            if not _run_endless and not _first_boot and _run_snapshot:
+                log('  💰 普通模式打完一整局（回到菜单）-> 计入局数')
+                _count_game('普通模式打完回菜单')
+            _run_snapshot = False   # 回到菜单 = 下一局重新记快照
             # 打完一局回到菜单后，问一次要不要继续
             if not ask_next_game and _first_boot:
                 # 本次启动第一次见菜单：直接开一局，不打扰用户
