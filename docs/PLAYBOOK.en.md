@@ -973,6 +973,72 @@ bathroom (a new user would otherwise see "game launched but nothing happens").
 
 **Write `yes` and the next game starts** — keep playing inside the same session; nothing needs restarting.
 
+---
+
+## ‼️ What counts as "one game": it depends on the mode
+
+**When the user says "play one game", which game they mean depends on the mode. Don't mix these up.**
+
+| Mode | One game = | Counts as finished when |
+|---|---|---|
+| **Endless** (take the pill: yes) | **one death** | **you die once, that game is over** |
+| **Normal** (take the pill: no) | **finishing and getting paid** | **all 3 stages cleared and the case is cashed out** |
+
+**So:**
+
+- **Die in endless mode** → **that game is over, you're back at the menu** (start another to keep going)
+- **Die in normal mode** → **the game is NOT over**. Pick "retry" and you replay **the same stage**
+- **Quit in normal mode without getting paid** (pick "quit" on the heaven screen) → **that does not count as a finished game**
+
+**In one line: endless counts deaths, normal counts payouts.**
+
+---
+
+## 🎯 Playing exactly N games: write `target_games.txt`
+
+**Without this file, the loop asks "play again?" after every game.**
+
+**To auto-play N games in a row**, write:
+
+```powershell
+'3' | Out-File -Encoding utf8 out\br\target_games.txt
+```
+
+**Then it will:**
+
+```
+after game 1 → 局数 1/3 -> 自动开下一局
+after game 2 → 局数 2/3 -> 自动开下一局
+after game 3 → 已打满 3 局（目标 3）-> asks "play again?"
+               and deletes target_games.txt, resetting the counter
+```
+
+**Progress is in `out\br\games_done.txt`.**
+
+**⚠️ The counter ticks when the loop sees the menu again, so:**
+- **Endless**: one death = +1 (matches "count deaths")
+- **Normal**: only counts once you're back at the menu — dying mid-run and retrying does not add, which matches "only a payout counts"
+
+---
+
+## 🔓 How to resume after it stops
+
+**After you answer `no` the loop stays quiet (it will not keep asking). Two ways back:**
+
+**① Answer a decision point** (if one is still open):
+```powershell
+python tools\br-next.py yes
+```
+
+**② Tell the mod to start a game directly** (most reliable, bypasses the loop):
+```powershell
+'menu_start' | Out-File -Encoding utf8 out\br\cmd_menu.txt
+```
+
+**The loop resumes by itself once the game leaves the menu.**
+
+**Also**: if you answered **`yes` but `menu_start` did not take effect** (game still at the menu), the loop **retries after 60 seconds**.
+
 ### When you actually should rerun
 
 | Situation | Restart? |

@@ -688,6 +688,9 @@ def main():
 
     menu_since = time.time()   # 进入菜单的时刻（用于「menu_start 没生效」的解锁判断）
     menu_silent = False        # 用户答过 no 之后为 True：安静待着，不再自动追问
+    _run_endless = False       # 这一局是无尽模式吗（离开菜单时从 state.endless 记下来）
+    _run_wins = 0              # 开局时的 wins，用来判断普通模式下"这局拿到钱了吗"
+    _run_snapshot = False      # 这一局的快照记过没（每局只记一次）
     item_retry = 0           # 道具阶段重跑次数（<3）
     item_done_at = 0          # 道具阶段"做完"的时间戳（用来判断是不是真卡住）
     pill_answered = False   # 同一次洗手间里问过药瓶就不再问（选 ✘ 后药瓶仍可点，会无限追问）
@@ -764,6 +767,7 @@ def main():
         # 菜单状态下 state.json 是旧的（HealthCounter 不存在），不能拿它做判断
         if scn == 'menu':
             cash_seen = None
+            _run_snapshot = False   # 回到菜单 = 下一局重新记快照
             idle += 1
             if idle % 20 == 0:
                 log('在菜单待机')
@@ -787,23 +791,39 @@ def main():
             if not ask_next_game:
                 _tg = _read_target_games()
                 if _tg is not None:
-                    _done = _read_games_done() + 1
-                    _write_games_done(_done)
-                    if _done < _tg:
-                        _menu_start()
-                        log('  局数 %d/%d -> 自动开下一局' % (_done, _tg))
-                        ask_next_game = True
-                        menu_since = time.time()
-                        time.sleep(1.5)
-                        continue
-                    else:
-                        log('  已打满 %d 局（目标 %d）-> 停下来问' % (_done, _tg))
-                        _write_games_done(0)
+                    # 「一局」的判定要看模式（用户 2026-11-20 明确）：
+                    #   无尽模式：一次死亡 = 一局（死亡会直接回菜单）
+                    #   普通模式：打完 3 小关、开箱拿到钱 = 一局
+                    #            中途死掉会进「天堂」界面选重试，不是回菜单，所以不会误计；
+                    #            但如果在天堂选「退出」也会回菜单 —— 那种没拿到钱，不该算。
+                    # 判据就用游戏自己的 wins：普通模式里只有开箱拿到钱它才 +1。
+                    _run_over = True
+                    if not _run_endless:
                         try:
-                            os.remove(_TARGET)
+                            _w_now = int(rd(STATE).get("wins") or 0)
                         except Exception:
-                            pass
-                        # 不 continue：往下走正常提问，让用户决定还要不要
+                            _w_now = 0
+                        _run_over = _w_now > _run_wins
+                        if not _run_over:
+                            log('  普通模式：这局没拿到钱（wins 没变 %d）-> 不计入局数' % _w_now)
+                    if _run_over:
+                        _done = _read_games_done() + 1
+                        _write_games_done(_done)
+                        if _done < _tg:
+                            _menu_start()
+                            log('  局数 %d/%d -> 自动开下一局' % (_done, _tg))
+                            ask_next_game = True
+                            menu_since = time.time()
+                            time.sleep(1.5)
+                            continue
+                        else:
+                            log('  已打满 %d 局（目标 %d）-> 停下来问' % (_done, _tg))
+                            _write_games_done(0)
+                            try:
+                                os.remove(_TARGET)
+                            except Exception:
+                                pass
+                            # 不 continue：往下走正常提问，让用户决定还要不要
             if not ask_next_game:
                 dec = ask(T['askEnd'],
                           [('yes', T['askEndYes']),
@@ -828,6 +848,19 @@ def main():
         menu_silent = False
         menu_since = time.time()
         d = rd(STATE)
+        # 开局快照：模式 + wins。离开菜单后第一次读到真状态时记下，
+        # 后面回菜单时用它判断「这局算不算打完」。
+        _ss = str(d.get('socket') or '')
+        if _ss in ('home', 'enemy', 'shell compartment', 'health counter', 'briefcase', 'glass'):
+            if not _run_snapshot:
+                _run_endless = bool(d.get('endless'))
+                try:
+                    _run_wins = int(d.get('wins') or 0)
+                except Exception:
+                    _run_wins = 0
+                _run_snapshot = True
+                log('  开局记录：%s模式，wins=%d'
+                    % ('无尽' if _run_endless else '普通', _run_wins))
         if str(d.get('socket')) != 'briefcase':
             item_retry = 0        # 离开道具阶段就清零
             item_done = False
